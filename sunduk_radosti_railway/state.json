@@ -1,6 +1,51 @@
 {
-  "users": [],
-  "chat_ids": [],
-  "archive": [],
-  "training_messages": {}
+  "chat_ids": [
+    6240720190,
+    957058933,
+    447240921
+  ],
+  "start_date": "2026-05-11",
+  "archive": [
+    {
+      "date": "2026-05-11 21:12",
+      "type": "text",
+      "text": "Я тебя буду любить всю свою жизни и много жизней вперёд!"
+    },
+    {
+      "date": "2026-05-11 21:13",
+      "type": "text",
+      "text": "Цем!"
+    },
+    {
+      "date": "2026-05-12 15:51",
+      "type": "cem_photo",
+      "file_id": "AgACAgIAAxkBAAPzagMiYprncCwetl_eWN09cF24-NoAAmMUaxsBrBlIOTD0L7P1xBoBAAMCAAN5AAM7BA"
+    },
+    {
+      "date": "2026-05-12 17:54",
+      "type": "text",
+      "text": "Я тебя очень крепко обнимаю!"
+    },
+    {
+      "date": "2026-05-13 12:49",
+      "type": "cem_photo",
+      "file_id": "AgACAgQAAxkBAAIBKGoESTi76IKb-y2FhU-gOSwStozqAAJBDWsbJfshUIsoRPBhPTUZAQADAgADeQADOwQ"
+    },
+    {
+      "date": "2026-05-13 18:15",
+      "type": "text",
+      "text": "Любимая расслабляется... А я скучаю! 💆‍♀️",
+      "from_chat_id": 957058933
+    }
+  ],
+  "waiting_for_cem_photo": false,
+  "waiting_for_archive_message": false,
+  "waiting_for_morning_reply": null,
+  "waiting_for_test_reply": null,
+  "users": [
+    447240921,
+    957058933,
+    6240720190
+  ],
+  "waiting_for_morning_answer": null
 }
