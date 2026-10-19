@@ -15,7 +15,10 @@ from telegram.error import TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 TOKEN = os.environ.get('BOT_TOKEN')
-STATE_FILE = Path(__file__).with_name('state.json')
+STATE_FILE = Path('/data/state.json')
+if not STATE_FILE.exists() and OLD_STATE_FILE.exists():
+    shutil.copy2(OLD_STATE_FILE, STATE_FILE)
+
 TIMEZONE = ZoneInfo('Europe/Sofia')
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
