@@ -49,12 +49,16 @@ def migrate_old_archive():
 
 TIMEZONE = ZoneInfo('Europe/Sofia')
 logging.basicConfig(level=logging.INFO)
+logging.getLogger('httpx').setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 BUTTON_WRITE = '💌 Просто написать!'
 BUTTON_ADD = '📦 Пополнить архив милостей'
 BUTTON_CEM = '😽 Отправить цем!'
 BUTTON_ARCHIVE = '💗 Посмотреть архив'
+BUTTON_VIEW_MESSAGES = '💌 Смотреть сообщения'
+BUTTON_VIEW_CEMS = '😽 Смотреть цемы'
+ARCHIVE_KEYBOARD = ReplyKeyboardMarkup([[BUTTON_VIEW_MESSAGES, BUTTON_VIEW_CEMS], [BUTTON_BACK]], resize_keyboard=True, is_persistent=True)
 KEYBOARD = ReplyKeyboardMarkup([[BUTTON_WRITE, BUTTON_ADD], [BUTTON_CEM, BUTTON_ARCHIVE]], resize_keyboard=True, is_persistent=True)
 
 PROMPTS = [
@@ -148,40 +152,41 @@ async def cem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text('Отправь милую/любую фотографию себя 😽\nИ она сохранится у нас!')
 
 
-
 async def archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    state = load_state()
-    items = state.get('archive', [])
-
+    """Show reliable Telegram reply-keyboard choices for the archive."""
     await update.effective_message.reply_text(
-        f'💗 В нашем архиве {len(items)} записей!'
+        'Что хочешь посмотреть в нашем архиве? 💗',
+        reply_markup=ARCHIVE_KEYBOARD,
     )
 
-    if not items:
-        await update.effective_message.reply_text(
-            'Архив пока пуст 🥺'
-        )
-        return
 
+async def show_archive_category(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str):
+    state = load_state()
+    items = [item for item in state.get('archive', []) if item.get('type') == kind]
+    chat_id = update.effective_chat.id
+    title = '💌 Наши сообщения' if kind == 'text' else '😽 Наши цемы'
+    await update.effective_message.reply_text(
+        f'{title}: {len(items)}', reply_markup=ARCHIVE_KEYBOARD,
+    )
+    if not items:
+        await update.effective_message.reply_text('Пока здесь пусто 💗')
+        return
     for item in items:
         try:
-            if item.get('type') == 'text':
-                await update.effective_message.reply_text(
-                    f"💌 {item.get('date', '')}\n\n{item.get('text', '')}"
+            if kind == 'text':
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"💌 {item.get('date', '')}\n\n{item.get('text', '')}",
                 )
-
-            elif item.get('type') == 'cem_photo':
+            else:
                 await context.bot.send_photo(
-                    chat_id=update.effective_chat.id,
+                    chat_id=chat_id,
                     photo=item['file_id'],
-                    caption=f"😽 {item.get('date', '')}"
+                    caption=f"😽 {item.get('date', '')}",
                 )
-
-        except Exception as exc:
-            log.exception('Ошибка отправки архива: %s', exc)
-            await update.effective_message.reply_text(
-                f'Не удалось показать одну запись: {type(exc).__name__}'
-            )
+        except (TelegramError, KeyError) as exc:
+            log.exception('Cannot send archived entry: %s', exc)
+            await update.effective_message.reply_text('Не удалось показать одну запись из архива.')
 
 
 async def notify_archive(context, state, sender, index):
@@ -203,6 +208,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     state = load_state()
     # Кнопки панели обрабатываются до режима ожидания сообщения.
+    if msg.text == BUTTON_VIEW_MESSAGES:
+        await show_archive_category(update, context, 'text')
+        return
+    if msg.text == BUTTON_VIEW_CEMS:
+        await show_archive_category(update, context, 'cem_photo')
+        return
+    if msg.text == BUTTON_BACK:
+        await msg.reply_text('Вернулись к нашим милостям 💗', reply_markup=KEYBOARD)
+        return
     if msg.text == BUTTON_WRITE:
         await write(update, context)
         return
@@ -323,6 +337,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text('Хочешь отреагировать сердечком?)', reply_markup=keyboard)
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    log.error('Telegram update processing failed', exc_info=context.error)
+
+
 async def setup_commands(app: Application):
     # Убираем старые команды из синего меню Telegram.
     await app.bot.delete_my_commands()
@@ -339,6 +357,7 @@ def main():
     app.add_handler(CommandHandler('cem', cem))
     app.add_handler(CommandHandler('archive', archive))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_error_handler(on_error)
     app.add_handler(MessageHandler(~filters.COMMAND & ~filters.StatusUpdate.ALL, handle_message))
     app.run_polling(drop_pending_updates=True)
 
