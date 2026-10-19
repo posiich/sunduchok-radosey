@@ -322,7 +322,7 @@ async def proposal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state['proposal_drafts'].pop(str(chat_id), None)
         save_state(state)
         await query.answer()
-        await query.edit_message_text('Предложение создано! 💌')
+        await query.edit_message_text('💌')
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(label, callback_data=f'proposal_vote:{proposal_id}:{i}')]
             for i, label in enumerate(proposal['options'])
