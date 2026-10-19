@@ -58,7 +58,7 @@ BUTTON_CEM = '😽 Отправить цем!'
 BUTTON_ARCHIVE = '💗 Посмотреть архив'
 BUTTON_VIEW_MESSAGES = '💌 Смотреть сообщения'
 BUTTON_VIEW_CEMS = '😽 Смотреть цемы'
-ARCHIVE_KEYBOARD = ReplyKeyboardMarkup([[BUTTON_VIEW_MESSAGES, BUTTON_VIEW_CEMS], [BUTTON_BACK]], resize_keyboard=True, is_persistent=True)
+ARCHIVE_KEYBOARD = ReplyKeyboardMarkup([[BUTTON_VIEW_MESSAGES, BUTTON_VIEW_CEMS]], resize_keyboard=True, is_persistent=True)
 KEYBOARD = ReplyKeyboardMarkup([[BUTTON_WRITE, BUTTON_ADD], [BUTTON_CEM, BUTTON_ARCHIVE]], resize_keyboard=True, is_persistent=True)
 
 PROMPTS = [
@@ -213,9 +213,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if msg.text == BUTTON_VIEW_CEMS:
         await show_archive_category(update, context, 'cem_photo')
-        return
-    if msg.text == BUTTON_BACK:
-        await msg.reply_text('Вернулись к нашим милостям 💗', reply_markup=KEYBOARD)
         return
     if msg.text == BUTTON_WRITE:
         await write(update, context)
