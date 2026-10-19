@@ -1,6 +1,6 @@
 """Личный Telegram-бот: архив, цемы и сообщения участникам.
 Установка: pip install python-telegram-bot>=21,<23
-Запуск: установите переменную окружения BOT_TOKEN и выполните python love_bot_updated.py
+Запуск: установите переменную окружения BOT_TOKEN и выполните python bot.py
 """
 import json
 import logging
@@ -16,8 +16,36 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 TOKEN = os.environ.get('BOT_TOKEN')
 STATE_FILE = Path('/data/state.json')
-if not STATE_FILE.exists() and OLD_STATE_FILE.exists():
-    shutil.copy2(OLD_STATE_FILE, STATE_FILE)
+OLD_STATE_FILE = Path(__file__).with_name('state.json')
+
+
+def migrate_old_archive():
+    """One-time, non-destructive migration from GitHub state.json to Volume."""
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not OLD_STATE_FILE.exists():
+        return
+    if STATE_FILE.exists():
+        with STATE_FILE.open(encoding='utf-8') as f:
+            current = json.load(f)
+    else:
+        current = {}
+    if current.get('_legacy_archive_imported'):
+        return
+    with OLD_STATE_FILE.open(encoding='utf-8') as f:
+        old = json.load(f)
+    for field in ('users', 'chat_ids'):
+        current[field] = list(dict.fromkeys(current.get(field, []) + old.get(field, [])))
+    current.setdefault('archive', [])
+    # Preserve new entries, adding only old entries not already present.
+    # Match on stored fields; old entries sometimes have no from_chat_id.
+    for item in old.get('archive', []):
+        if item not in current['archive']:
+            current['archive'].append(item)
+    current.setdefault('waiting', {})
+    current.setdefault('prompt_bags', {})
+    current['_legacy_archive_imported'] = True
+    save_state(current)
+
 
 TIMEZONE = ZoneInfo('Europe/Sofia')
 logging.basicConfig(level=logging.INFO)
@@ -276,6 +304,7 @@ async def setup_commands(app: Application):
 def main():
     if not TOKEN:
         raise RuntimeError('Укажите BOT_TOKEN в переменных окружения.')
+    migrate_old_archive()
     app = Application.builder().token(TOKEN).post_init(setup_commands).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('write', write))
