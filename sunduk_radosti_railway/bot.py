@@ -336,7 +336,6 @@ async def proposal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 delivered += 1
             except TelegramError:
                 log.exception('Не удалось доставить предложение участнику')
-        await context.bot.send_message(chat_id, f'💌 Предложение отправлено {delivered} участникам!')
         return
     if data.startswith('proposal_vote:'):
         try:
