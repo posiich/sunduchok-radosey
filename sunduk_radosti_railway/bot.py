@@ -148,13 +148,40 @@ async def cem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text('Отправь милую/любую фотографию себя 😽\nИ она сохранится у нас!')
 
 
+
 async def archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton('💌 Смотреть сообщения', callback_data='archive_messages')],
-        [InlineKeyboardButton('😽 Смотреть цемы', callback_data='archive_cems')],
-    ])
-    await update.effective_message.reply_text('Что хочешь посмотреть в нашем архиве?', reply_markup=keyboard)
+    state = load_state()
+    items = state.get('archive', [])
+
+    await update.effective_message.reply_text(
+        f'💗 В нашем архиве {len(items)} записей!'
+    )
+
+    if not items:
+        await update.effective_message.reply_text(
+            'Архив пока пуст 🥺'
+        )
+        return
+
+    for item in items:
+        try:
+            if item.get('type') == 'text':
+                await update.effective_message.reply_text(
+                    f"💌 {item.get('date', '')}\n\n{item.get('text', '')}"
+                )
+
+            elif item.get('type') == 'cem_photo':
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=item['file_id'],
+                    caption=f"😽 {item.get('date', '')}"
+                )
+
+        except Exception as exc:
+            log.exception('Ошибка отправки архива: %s', exc)
+            await update.effective_message.reply_text(
+                f'Не удалось показать одну запись: {type(exc).__name__}'
+            )
 
 
 async def notify_archive(context, state, sender, index):
