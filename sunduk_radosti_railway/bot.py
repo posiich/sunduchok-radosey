@@ -1,879 +1,272 @@
+"""Личный Telegram-бот: архив, цемы и сообщения участникам.
+Установка: pip install python-telegram-bot>=21,<23
+Запуск: установите переменную окружения BOT_TOKEN и выполните python love_bot_updated.py
+"""
 import json
-from datetime import date, time, datetime
+import logging
+import os
+import random
+from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
-from telegram.ext import MessageHandler, filters
+from telegram import BotCommand, Update
+from telegram.error import TelegramError
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-TOKEN = "8479252342:AAEEpFfheLieyIUC1hex2WVjf2EzQ7mQJyE"
+TOKEN = os.environ.get('BOT_TOKEN')
+STATE_FILE = Path(__file__).with_name('state.json')
+TIMEZONE = ZoneInfo('Europe/Sofia')
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
-TARGET_DATE = date(2026, 8, 27)
-TIMEZONE = ZoneInfo("Europe/Sofia")
+PROMPTS = [
+    'Пиши сообщение, а я отнесу любимой 💌',
+    'Ну рассказывай! Я уже приготовил крылышки для доставки 🕊️',
+    'Что передать твоему любимому человеку?))',
+    'Пиши скорее, тут кое-кто очень ждёт весточку 🥹',
+    'Давай свои самые тёплые слова, доставлю бережно ✨',
+    'Опааа, давай пиши! Любимая уже ждет!',
+    'Есть что сказать любимой? Я весь внимание 😽',
+    'Твоё сообщение уже почти летит. Осталось его написать 💌',
+    'Пиши! У меня сегодня экспресс-доставка нежностей 🐾',
+    'Слушаю-смотрю-жду! Что отправим любимой? 🌷',
+]
 
 
 def load_state():
-    with open("state.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+    if not STATE_FILE.exists():
+        return {'users': [], 'chat_ids': [], 'archive': [], 'waiting': {}, 'prompt_bags': {}}
+    with STATE_FILE.open(encoding='utf-8') as f:
+        state = json.load(f)
+    state.setdefault('users', [])
+    state.setdefault('chat_ids', [])
+    state.setdefault('archive', [])
+    state.setdefault('waiting', {})
+    state.setdefault('prompt_bags', {})
+    return state
 
 
 def save_state(state):
-    with open("state.json", "w", encoding="utf-8") as f:
+    temp = STATE_FILE.with_suffix('.tmp')
+    with temp.open('w', encoding='utf-8') as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
+    temp.replace(STATE_FILE)
 
 
-daily_wishes = {
-    "2026-08-13": "",
-    "2026-08-14": "Хии, неожиданно? Люблю тебя очень! Скучаю, и жду, когда ты вернешься назад",
-    "2026-08-15": (
-    "Желаю тебе сегодня приятнейшего дня... со мной! "
-    '<tg-emoji emoji-id="5235734531629129786">🥁</tg-emoji>'
-),
-    
-    "2026-08-16": (
-    "Любимая, а что если сегодня... я, ты, суши на закате... Свидание?)"
-    '<tg-emoji emoji_id": "5453930874699542906">🥰</tg-emoji>''<tg-emoji emoji_id": "5453930874699542906">🥰</tg-emoji>''<tg-emoji emoji_id": "5453930874699542906">🥰</tg-emoji>'
-),
-    
-    "2026-08-17": "Цем цем цем мое солнышко! Желаю легкого дня!",
-    
-    "2026-08-18": (
-    "Желаю тебе сегодня милого и доброго дня.. И моих теплых обнимашек",
-    '<tg-emoji emoji_id": "5348213226825854167">🥴</tg-emoji>'
-),    
-    
-    "2026-08-19": "Желаю приятных разговоров... и спокойной работы",
-    
-    "2026-08-20": "Желаю сегодня вкусно и правильно покушать",
-    
-    "2026-08-21": "Желаю любименькой сегодня сил и энергии! Ты выу! Помнишь? Всегда знай! Я восхищаюсь и люблю тебя!",
-    
-    "2026-08-22": (
-    "Останется чуть-чуть... и мы будем в теплой Испании"
-    '<tg-emoji emoji_id": "5242677827299450340">🐷</tg-emoji>''<tg-emoji emoji_id": "5242677827299450340">🐷</tg-emoji>'
-), 
-    
-    "2026-08-23": "Желаю ту-ту-туу... прокатиться с любимой за лате и чизкейком. Обещаю вести идеально!",
-    
-    "2026-08-24": "Желаю наслаждаться каждой минуткой, ведь осталось чуть-чуть работы этим летом",
-    
-    "2026-08-25": (
-    "Желаю нам завтра легко и быстро собрать багаж! Помню, что не любишь, но ИСПАНИЯ, любимая!!"
-    '<tg-emoji emoji-id="5235734531629129786">🥁</tg-emoji>''<tg-emoji emoji-id="5235734531629129786">🥁</tg-emoji>''<tg-emoji emoji-id="5235734531629129786">🥁</tg-emoji>''<tg-emoji emoji-id="5235734531629129786">🥁</tg-emoji>'
-),
-    
-    "2026-08-26": "Лююююбимая! А завтра мы летииим! Благодарна жизни за тебя! Спасибо! Я счастлива с тобой путешестовать! Желаю нам спокойного и классного дня тут!",
-}
-training_videos = {
-    "2026-05-16": {
-        "title": "Йога вступительная 🪷",
-        "file_id": "BAACAgQAAxkBAAIBmWoIBgABf0KucHctNDiRsmfGB2JDjgACHB4AAh3mQFAWIimEQyoofjsE",
-        "caption": (
-            "ЙОГА ВСТУПИТЕЛЬНАЯ\n"
-            "🔓 Урок 0\n\n"
-            "Теперь доступно!\n\n"
-            "Это вступительный урок, чтобы познакомить тебя с каким-то базовыми аспектами и проверить твою готовность 🌿\n\n"
-            "⏰ <b>Когда лучше выполнять?</b>\n"
-            "В любое время, но желательно, чтобы прошло 2–3 часа после еды.\n"
-            "(Впрочем, как и для любой тренировки)\n\n"
-            '<tg-emoji emoji-id="5336864029149257027">🪷</tg-emoji> '
-            "Здесь я стараюсь всё объяснять максимально подробно.\n"
-            "Дальше этого будет чуть меньше, но главное и важное я буду рассказывать всегда ✨\n\n"
-            "💗 В этом уроке я затрону базовые переходы и акценты в йоге.\n"
-            "А дальше мы будем двигаться уже чуть активнее 🌙\n\n"
-            '<tg-emoji emoji-id="5336864029149257027">🪷</tg-emoji> '
-            "И я очень жду от тебя обратную связь!\n"
-            "Расскажи все! Что почувствовала, что понравилось, что было сложно и как ты себя ощущаешь 💗"
-        )
-    },
-    "2026-05-18": {
-        "title": "25 минут - Легкость в теле",
-        "file_id": "BAACAgQAAxkBAAIBtmoJ3N-0AAHjBysgXNWDs44ngzFsXgACqyAAArwVUVCHFCqtu3coWTsE",
-        "caption": (
-            "Сегодня тебя ждёт тренировка на лёгкость в теле!\n\n"
-            "⏰ <b>Когда лучше выполнять?</b>\n"
-            "В любое время, но желательно, чтобы прошло 2–3 часа после еды.\n"
-            "Тренировка для того, чтобы хорошенько разогнать энергию в теле, почувстовать себя гибче, свободнее и легче :)\n\n"
-            "Я еще не профессиональный тренер, поэтому представляй, что ты просто занимаешься со мной) Я рядом, я с тобой! И мы вместе занимаемся!)"
-            "И я очень жду от тебя обратную связь!\n"
-        )
-    },
-    "2026-05-20": {
-        "title": "20 минут - утренняя йога - энергия на день",
-        "file": "video_2.mp4",
-        "caption": (
-            "Сегодня тебя ждёт тренировка на лёгкость в теле 🌿\n\n"
-            "Не спеши. Дыши. Почувствуй себя.\n\n"
-            "Я рядом, включай видео 💗"
-        )
-    },
-    "2026-05-30": {
-        "title": "Раскрытие грудного отдела и шеи 🫶",
-        "file": "video_3.mp4",
-        "caption": "Тренировка на сегодня: Раскрытие грудного отдела и шеи 🫶"
-    },
-    "2026-05-30": {
-        "title": "Йога детокс для иммунной системы 🍃",
-        "file": "video_4.mp4",
-        "caption": "Тренировка на сегодня: Йога детокс для иммунной системы 🍃"
-    },
-    "2026-05-30": {
-        "title": "Сила спины с мячиком 🎾",
-        "file": "video_5.mp4",
-        "caption": "Тренировка на сегодня: Сила спины с мячиком 🎾"
-    },
-    "2026-05-30": {
-        "title": "Вечерняя йога 🌙",
-        "file": "video_6.mp4",
-        "caption": "Тренировка на сегодня: Вечерняя йога 🌙"
-    },
-    "2026-05-24": {
-        "title": "Гибкость и сила позвоночника 🌀",
-        "file": "video_7.mp4",
-        "caption": "Тренировка на сегодня: Гибкость и сила позвоночника 🌀"
-    },
-    "2026-05-25": {
-        "title": "Йога на тазобедренные суставы 🧘‍♀️",
-        "file": "video_8.mp4",
-        "caption": "Тренировка на сегодня: Йога на тазобедренные суставы 🧘‍♀️"
-    },
-    "2026-05-26": {
-        "title": "Для осанки ✨",
-        "file": "video_9.mp4",
-        "caption": "Тренировка на сегодня: Для осанки ✨"
-    },
-    "2026-05-27": {
-        "title": "Йога среднего уровня 🔥",
-        "file": "video_10.mp4",
-        "caption": "Тренировка на сегодня: Йога среднего уровня 🔥"
-    },
-    "2026-05-28": {
-        "title": "Бонусная — Йога YIN 🤍",
-        "file": "video_11.mp4",
-        "caption": "Бонусная тренировка: Йога YIN 🤍"
-    },
-}
+def register(state, chat_id):
+    if chat_id not in state['users']:
+        state['users'].append(chat_id)
+    if chat_id not in state['chat_ids']:
+        state['chat_ids'].append(chat_id)
 
-async def start(update, context: ContextTypes.DEFAULT_TYPE):
+
+def next_prompt(state, chat_id):
+    key = str(chat_id)
+    bag = state['prompt_bags'].get(key, [])
+    if not bag:
+        bag = list(range(len(PROMPTS)))
+        random.shuffle(bag)
+        previous = state.get('last_prompt', {}).get(key)
+        if previous is not None and bag[-1] == previous and len(bag) > 1:
+            bag[0], bag[-1] = bag[-1], bag[0]
+    index = bag.pop()
+    state['prompt_bags'][key] = bag
+    state.setdefault('last_prompt', {})[key] = index
+    return PROMPTS[index]
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = load_state()
+    register(state, update.effective_chat.id)
+    save_state(state)
+    await update.message.reply_text('Привет, любимая! 💗\n\nЗдесь можно писать друг другу, сохранять весточки и собирать цемы. Выбирай команду в меню бота 😽')
+
+
+async def write(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
     chat_id = update.effective_chat.id
-
-    if "users" not in state:
-        state["users"] = []
-
-    if chat_id not in state["users"]:
-        state["users"].append(chat_id)
-
-    if "chat_ids" not in state:
-        state["chat_ids"] = []
-
-    if chat_id not in state["chat_ids"]:
-        state["chat_ids"].append(chat_id)
-
-    if "archive" not in state:
-        state["archive"] = []
-
-    if state.get("start_date") is None:
-        state["start_date"] = str(datetime.now(TIMEZONE).date())
-
+    register(state, chat_id)
+    state['waiting'][str(chat_id)] = 'write'
+    prompt = next_prompt(state, chat_id)
     save_state(state)
-
-    await update.message.reply_text(
-        'Привет, моя дорогая Света '
-        '<tg-emoji emoji-id="5235734531629129786">✨</tg-emoji>\n\n'
-        'В этом сундуке будут происходить чудеса... и очень много всего полезного. Так что уведомления не отключай и можешь даже себе закрепить этот бот куда-то)\n\n'
-        '<b>Что тебя тут ждёт?</b>\n\n'
-        '🔔 Каждое утро будет приходить напоминание, сколько дней осталось до тёплой Испании\n\n'
-        'Цем!\n\n'
-        '<tg-emoji emoji-id="5240175914360250771">😺</tg-emoji>\n\n',
-        parse_mode="HTML"
-    )
+    await update.effective_message.reply_text(prompt)
 
 
-def days_word(number: int) -> str:
-    number = abs(number) % 100
-    last_digit = number % 10
-
-    if 11 <= number <= 19:
-        return "дней"
-    if last_digit == 1:
-        return "день"
-    if 2 <= last_digit <= 4:
-        return "дня"
-    return "дней"
-
-
-async def morning(context: ContextTypes.DEFAULT_TYPE):
+async def archive_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
-
-    today = datetime.now(TIMEZONE).date()
-    days_left = (TARGET_DATE - today).days
-
-    wish = daily_wishes.get(today.isoformat(), "").strip()
-
-    if days_left > 0:
-        text = (
-            'Доброе утроооо ☀️'
-            '<tg-emoji emoji-id="5256215937878609569">🐤</tg-emoji>\n\n'
-            'До Испании вместе осталось...\n'
-            f'⏳ <b>{days_left} {days_word(days_left)}</b> ⏳'
-            + (f'\n\n{wish}' if wish else '')
-        )
-    elif days_left == 0:
-        text = (
-            'Доброе утроооо ☀️'
-            '<tg-emoji emoji-id="5256215937878609569">🐤</tg-emoji>\n\n'
-            '<b>Сегодня тот самый день!</b> 🇪🇸\n\n'
-            'Ураааа, любимаяяя! Мы летим вместе отдыхааать!! ✈️💗'
-        )
-    else:
-        return
-
-    chat_ids = state.get("chat_ids", [])
-
-    morning_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "Хочу написать что-то в ответ!",
-                callback_data="morning_reply"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Кусь 💩",
-                callback_data="morning_brat"
-            )
-        ]
-    ])
-
-    for chat_id in chat_ids:
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode="HTML",
-                reply_markup=morning_keyboard
-            )
-            print(f"Утро отправлено: {chat_id}")
-        except Exception as e:
-            print(f"Ошибка утреннего сообщения для {chat_id}: {e}")
-
-
-async def send_training_video(context: ContextTypes.DEFAULT_TYPE):
-    state = load_state()
-
-    today = datetime.now(TIMEZONE).date()
-    today_str = today.isoformat()
-
-    video_data = training_videos.get(today_str)
-
-    if not video_data:
-        print("На сегодня тренировки нет")
-        return
-
-    chat_ids = state.get("chat_ids", [])
-
-    feedback_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "💌 Оставить свои впечатления",
-                callback_data="lesson_feedback"
-            )
-        ]
-    ])
-
-    for chat_id in chat_ids:
-        try:
-            if "file_id" in video_data:
-                await context.bot.send_video(
-                    chat_id=chat_id,
-                    video=video_data["file_id"],
-                    caption=video_data["caption"],
-                    parse_mode="HTML",
-                    reply_markup=feedback_keyboard,
-                    supports_streaming=True
-                )
-
-            else:
-                with open(video_data["file"], "rb") as video:
-                    await context.bot.send_video(
-                        chat_id=chat_id,
-                        video=video,
-                        caption=video_data["caption"],
-                        parse_mode="HTML",
-                        reply_markup=feedback_keyboard,
-                        supports_streaming=True,
-                        write_timeout=300,
-                        read_timeout=300,
-                        connect_timeout=300,
-                        pool_timeout=300
-                    )
-
-            print(f"Видео отправлено: {chat_id}")
-
-        except Exception as e:
-            print(f"Ошибка видео для {chat_id}: {e}")
-
-
-async def test_morning(update, context: ContextTypes.DEFAULT_TYPE):
-    today = datetime.now(TIMEZONE).date()
-    days_left = (TARGET_DATE - today).days
-
-    wish = daily_wishes.get(today.isoformat(), "").strip()
-
-    if days_left > 0:
-        text = (
-            "🔬 ТЕСТ УТРА\n\n"
-            'Доброе утроооо ☀️'
-            '<tg-emoji emoji-id="5256215937878609569">🐤</tg-emoji>\n\n'
-            'До Испании вместе осталось...\n'
-            f'⏳ <b>{days_left} {days_word(days_left)}</b> ⏳'
-            + (f'\n\n{wish}' if wish else '')
-        )
-    elif days_left == 0:
-        text = (
-            "🔬 ТЕСТ УТРА\n\n"
-            '<b>Сегодня тот самый день!</b> 🇪🇸\n\n'
-            'Ураааа, любимаяяя! Мы летим вместе отдыхааать!! ✈️💗'
-        )
-    else:
-        text = "Отсчёт уже завершён 🇪🇸"
-
-    morning_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "Хочу написать что-то в ответ!",
-                callback_data="test_morning_reply"
-            )
-        ]
-    ])
-
-    await update.message.reply_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=morning_keyboard
-    )
-
-
-async def videos(update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Сгораю от нетерпения!", callback_data="show_videos")]
-    ]
-
-    await update.message.reply_text(
-        "Хочешь заглянуть в тренировки? 👀",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-async def send_game_start(context: ContextTypes.DEFAULT_TYPE):
-    state = load_state()
-
-    text = (
-        "🎉 <b>ИГРА НАЧИНАЕТСЯ!</b> 🎉\n\n"
-        "Мы будем вместе всё лето 🌞\n\n"
-        "Начиная с сегодняшнего дня до 1 сентября — 82 дня!\n\n"
-        "И чтобы не потерять счёт времени, предлагаю тебе вести обратный отсчёт...\n\n"
-        "Каждый день ты будешь находить по одной маленькой ящерке 🦎\n"
-        "и вклеивать её в таблицу обратного отсчёта\n\n"
-        "Где находить?) А везде! Будь внимательна в течнии всего дня))) Цеееем тебя!"
-    )
-
-    for chat_id in state.get("chat_ids", []):
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode="HTML"
-        )
-
-async def archive_add(update, context: ContextTypes.DEFAULT_TYPE):
-    state = load_state()
-
-    state["waiting_for_archive_message"] = True
-    state["waiting_for_test_reply"] = None
-    state["waiting_for_morning_reply"] = None
-    state["waiting_for_lesson_feedback"] = None
-
+    chat_id = update.effective_chat.id
+    register(state, chat_id)
+    state['waiting'][str(chat_id)] = 'archive'
     save_state(state)
-
-    await update.message.reply_text(
-        "Напиши любое сообщение и оно будет у нас в архиве! Жду)",
-        parse_mode="HTML"
-    )
+    await update.effective_message.reply_text('Напиши любое сообщение, и оно будет у нас в архиве! Жду)')
 
 
-async def handle_text(update, context: ContextTypes.DEFAULT_TYPE):
+async def cem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
-
-    waiting_answer = state.get("waiting_for_morning_answer")
-
-    if waiting_answer and waiting_answer.get("from_chat_id") == update.effective_chat.id:
-        answer_text = update.message.text
-        recipient_chat_id = waiting_answer["to_chat_id"]
-
-        state["waiting_for_morning_answer"] = None
-        save_state(state)
-
-        await context.bot.send_message(
-            chat_id=recipient_chat_id,
-            text=f"Тебе прилетела ответочка на ответочку 💌\n\n{answer_text}"
-        )
-
-        await update.message.reply_text("💌")
-        return
-
-    if state.get("waiting_for_lesson_feedback") == update.effective_chat.id:
-        feedback_text = update.message.text
-
-        state["waiting_for_lesson_feedback"] = None
-        save_state(state)
-
-        await context.bot.send_message(
-            chat_id=6240720190,
-            text=f"Пришли впечатления от тренировки 🌿\n\n{feedback_text}"
-        )
-
-        await update.message.reply_text("🍓")
-        return
-
-    if state.get("waiting_for_test_reply") == update.effective_chat.id:
-        state["waiting_for_test_reply"] = None
-        save_state(state)
-
-        await update.message.reply_text(
-            "Тестовая ответочка получена 😺\n\n"
-            "Ничего никому не отправляю!"
-        )
-        return
-
-    if state.get("waiting_for_morning_reply") == update.effective_chat.id:
-        reply_text = update.message.text
-        sender_chat_id = update.effective_chat.id
-
-        state["waiting_for_morning_reply"] = None
-        save_state(state)
-
-        answer_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "💌 Ответить на ответочку",
-                    callback_data=f"answer_morning:{sender_chat_id}"
-                )
-            ]
-        ])
-
-        for user_chat_id in state.get("users", []):
-            if user_chat_id != sender_chat_id:
-                await context.bot.send_message(
-                    chat_id=user_chat_id,
-                    text=f"Вам прилетела ответочка на утро!\n\n{reply_text}",
-                    reply_markup=answer_keyboard
-                )
-
-        await update.message.reply_text(
-            'Как милоооо, идем активничать! '
-            '<tg-emoji emoji-id="5443132326189996902">🧑‍💻</tg-emoji>',
-            parse_mode="HTML"
-        )
-        return
-
-    if not state.get("waiting_for_archive_message"):
-        return
-
-    message = update.message.text
-
-    if "archive" not in state:
-        state["archive"] = []
-
-    state["archive"].append({
-        "date": datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M"),
-        "type": "text",
-        "text": message,
-        "from_chat_id": update.effective_chat.id
-    })
-
-    archive_index = len(state["archive"]) - 1
-
-    state["waiting_for_archive_message"] = False
+    chat_id = update.effective_chat.id
+    register(state, chat_id)
+    state['waiting'][str(chat_id)] = 'cem'
     save_state(state)
-
-    await notify_others_about_archive(
-        context=context,
-        state=state,
-        sender_chat_id=update.effective_chat.id,
-        archive_index=archive_index
-    )
-
-    await update.message.reply_text("Сохранено в архив 💌")
-
-async def archive(update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("💌 Смотреть сообщения", callback_data="archive_messages")],
-        [InlineKeyboardButton("😽 Смотреть цемы", callback_data="archive_cems")]
-    ]
-
-    await update.message.reply_text(
-        "Что хочешь посмотреть в нашем архиве?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.effective_message.reply_text('Отправь милую/любую фотографию себя 😽\nИ она сохранится у нас!')
 
 
-async def cem(update, context: ContextTypes.DEFAULT_TYPE):
-    state = load_state()
-
-    state["waiting_for_cem_photo"] = True
-    save_state(state)
-
-    await update.message.reply_text(
-        "Отправь милую/любую фотографию себя 😽\n"
-        "И она сохранится у нас!"
-    )
-
-
-async def handle_photo(update, context: ContextTypes.DEFAULT_TYPE):
-    state = load_state()
-
-    if not state.get("waiting_for_cem_photo"):
-        return
-
-    photo = update.message.photo[-1]
-
-    if "archive" not in state:
-        state["archive"] = []
-
-    state["archive"].append({
-        "date": datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M"),
-        "type": "cem_photo",
-        "file_id": photo.file_id,
-        "from_chat_id": update.effective_chat.id
-    })
-
-    archive_index = len(state["archive"]) - 1
-
-    state["waiting_for_cem_photo"] = False
-    save_state(state)
-
-    await notify_others_about_archive(
-        context=context,
-        state=state,
-        sender_chat_id=update.effective_chat.id,
-        archive_index=archive_index
-    )
-
-    await update.message.reply_text(
-        "Готово 😽\n"
-        "Бережно-бережно отправлено в архив!"
-    )
-
-
-async def notify_others_about_archive(context, state, sender_chat_id, archive_index):
+async def archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "🥹 Уии, посмотреть",
-                callback_data=f"view_archive:{archive_index}"
-            )
-        ]
+        [InlineKeyboardButton('💌 Смотреть сообщения', callback_data='archive_messages')],
+        [InlineKeyboardButton('😽 Смотреть цемы', callback_data='archive_cems')],
     ])
-
-    for user_chat_id in state.get("users", []):
-        if user_chat_id != sender_chat_id:
-            await context.bot.send_message(
-                chat_id=user_chat_id,
-                text="Вам прилетела милая весточка из архива 💌",
-                reply_markup=keyboard
-            )
+    await update.effective_message.reply_text('Что хочешь посмотреть в нашем архиве?', reply_markup=keyboard)
 
 
-async def button_handler(update, context: ContextTypes.DEFAULT_TYPE):
+async def notify_archive(context, state, sender, index):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton('🥹 Уии, посмотреть', callback_data=f'view_archive:{index}')]])
+    for recipient in set(state['users']):
+        if recipient == sender:
+            continue
+        try:
+            await context.bot.send_message(recipient, 'Вам прилетела милая весточка из архива 💌', reply_markup=keyboard)
+        except TelegramError as exc:
+            log.warning('Не удалось уведомить %s: %s', recipient, exc)
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    if not msg:
+        return
+    chat_id = update.effective_chat.id
+    state = load_state()
+    mode = state['waiting'].get(str(chat_id))
+    if not mode:
+        return
+
+    if mode == 'write':
+        # copy_message отправляет оригинальное содержимое без отметки «Переслано»
+        # и без текста от бота; поддерживает текст, фото, видео, голосовые и т.д.
+        recipients = set(state['users']) | set(state['chat_ids'])
+        recipients.discard(chat_id)
+        if not recipients:
+            await msg.reply_text('Пока некому доставить сообщение. Другой участник должен сначала открыть бота и нажать /start.')
+            return
+        success = 0
+        for recipient in recipients:
+            try:
+                await context.bot.copy_message(chat_id=recipient, from_chat_id=chat_id, message_id=msg.message_id)
+                success += 1
+            except TelegramError as exc:
+                log.warning('Не удалось доставить сообщение %s: %s', recipient, exc)
+        if success:
+            state['waiting'].pop(str(chat_id), None)
+            save_state(state)
+            # Никаких дополнительных сообщений получателям и отправителю.
+        else:
+            await msg.reply_text('Не получилось доставить сообщение. Попробуй ещё раз.')
+        return
+
+    if mode == 'archive':
+        if not msg.text:
+            await msg.reply_text('Для архива отправь текстовое сообщение 💌')
+            return
+        state['archive'].append({
+            'date': datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M'),
+            'type': 'text', 'text': msg.text, 'from_chat_id': chat_id,
+        })
+        index = len(state['archive']) - 1
+        state['waiting'].pop(str(chat_id), None)
+        save_state(state)
+        await notify_archive(context, state, chat_id, index)
+        await msg.reply_text('Сохранено в архив 💌')
+        return
+
+    if mode == 'cem':
+        if not msg.photo:
+            await msg.reply_text('Для цема отправь фотографию 😽')
+            return
+        state['archive'].append({
+            'date': datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M'),
+            'type': 'cem_photo', 'file_id': msg.photo[-1].file_id,
+            'from_chat_id': chat_id,
+        })
+        index = len(state['archive']) - 1
+        state['waiting'].pop(str(chat_id), None)
+        save_state(state)
+        await notify_archive(context, state, chat_id, index)
+        await msg.reply_text('Готово 😽\nБережно-бережно отправлено в архив!')
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     query = update.callback_query
     await query.answer()
-
     state = load_state()
     data = query.data
+    items = state['archive']
 
-    if data == "morning_reply":
-        state["waiting_for_morning_reply"] = query.message.chat_id
-        save_state(state)
-
-        await query.message.reply_text("Хиии, что сегодня скажешь?))")
-        return
-
-    if data == "test_morning_reply":
-        state["waiting_for_test_reply"] = query.message.chat_id
-        save_state(state)
-
-        await query.message.reply_text(
-            "Хиии, что сегодня скажешь?))\n\n"
-            "Это тест, другим ничего не уйдёт."
-        )
-        return
-    
-    if data.startswith("answer_morning:"):
-        recipient_chat_id = int(data.split(":")[1])
-
-        state["waiting_for_morning_answer"] = {
-            "from_chat_id": query.message.chat_id,
-            "to_chat_id": recipient_chat_id
-        }
-        save_state(state)
-
-        await query.message.reply_text(
-            "Пиши ответочку на ответочку, я передам 💌"
-        )
-        return
-
-    if data == "lesson_feedback":
-        state["waiting_for_lesson_feedback"] = query.message.chat_id
-        save_state(state)
-
-        await query.message.reply_text(
-            "Урааа, расскажи свои впечатления!"
-            '<tg-emoji emoji-id="5235734531629129786">🥁</tg-emoji>',
-            parse_mode="HTML"
-        )
-        return
-
-    if data.startswith("react_morning:"):
-        sender_chat_id = int(data.split(":")[1])
-
-        await context.bot.send_message(
-            chat_id=sender_chat_id,
-            text="Твоё сообщение прочитано и это было ооочень приятно 🌞"
-        )
-
-        await query.message.reply_text("Реакция улетела ❤️")
-        return
-
-    if data == "show_videos":
-        buttons = []
-        today = datetime.now(TIMEZONE).date()
-
-        for video_date_str, video in training_videos.items():
-            video_date = date.fromisoformat(video_date_str)
-
-            if today < video_date:
-                title = f"🔒 {video['title']}"
-            else:
-                title = f" {video['title']}"
-
-            buttons.append([
-                InlineKeyboardButton(title, callback_data=video_date_str)
-            ])
-
-        await query.edit_message_text(
-            "Вот список тренировок 💪\n\n"
-            "Но пока рановато открывать их 🫣",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        return
-
-    if data == "archive_messages":
-        archive_items = state.get("archive", [])
-        messages = [item for item in archive_items if item.get("type") == "text"]
-
+    if data == 'archive_messages':
+        messages = [item for item in items if item.get('type') == 'text'][-15:]
         if not messages:
-            await query.edit_message_text("Ай-яй-яй... сообщений пока нет...")
+            await query.edit_message_text('Ай-яй-яй... сообщений пока нет...')
             return
-
-        text = "<b>Наши сообщения 💌</b>\n\n"
-
-        for item in messages[-15:]:
-            text += f"💌 {item.get('date', '')}\n{item.get('text', '')}\n\n"
-
-        await query.edit_message_text(text, parse_mode="HTML")
+        await query.edit_message_text('Наши сообщения 💌')
+        for item in messages:
+            await context.bot.send_message(query.message.chat_id, f"💌 {item.get('date', '')}\n{item.get('text', '')}")
         return
-
-    if data == "archive_cems":
-        archive_items = state.get("archive", [])
-        cems = [item for item in archive_items if item.get("type") == "cem_photo"]
-
+    if data == 'archive_cems':
+        cems = [item for item in items if item.get('type') == 'cem_photo'][-15:]
         if not cems:
-            await query.edit_message_text("Цемов пока нет... подозрительно тихо")
+            await query.edit_message_text('Цемов пока нет... подозрительно тихо')
             return
-
-        await query.edit_message_text(
-            "<b>Архив цемов 😽</b>",
-            parse_mode="HTML"
-        )
-
-        for item in cems[-15:]:
-            await context.bot.send_photo(
-                chat_id=query.message.chat_id,
-                photo=item["file_id"],
-                caption=f"😽 {item.get('date', '')}"
-            )
-
+        await query.edit_message_text('Архив цемов 😽')
+        for item in cems:
+            await context.bot.send_photo(query.message.chat_id, item['file_id'], caption=f"😽 {item.get('date', '')}")
         return
-
-    if data.startswith("view_archive:"):
-        archive_index = int(data.split(":")[1])
-        archive_items = state.get("archive", [])
-
-        if archive_index >= len(archive_items):
-            await query.message.reply_text("Ой-йой! Тут ничего не было, тебе показалось)")
+    if data.startswith('view_archive:') or data.startswith('send_heart:'):
+        try:
+            index = int(data.split(':', 1)[1])
+            item = items[index] if index >= 0 else None
+        except (ValueError, IndexError):
+            item = None
+        if item is None:
+            await query.message.reply_text('Ой, весточка потерялась 🫣')
             return
-
-        item = archive_items[archive_index]
-
-        heart_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "❤️",
-                    callback_data=f"send_heart:{archive_index}"
-                )
-            ]
-        ])
-
-        if item.get("type") == "cem_photo":
-            await context.bot.send_photo(
-                chat_id=query.message.chat_id,
-                photo=item["file_id"],
-                caption=(
-                    f"💌 Любимая пишет...\n\n"
-                    f"😽 {item.get('date', '')}"
-                )
-            )
+        if data.startswith('send_heart:'):
+            recipient = item.get('from_chat_id')
+            if recipient:
+                await context.bot.send_message(recipient, 'Твою весточку получили, увидели, оооочень улыбнулись! И отправили сердечко в ответ) ❤️')
+                await query.message.reply_text('Клааасс, спасибо за реакцию! Цем тебя!)')
+            return
+        if item.get('type') == 'cem_photo':
+            await context.bot.send_photo(query.message.chat_id, item['file_id'], caption=f"💌 Любимая пишет...\n\n😽 {item.get('date', '')}")
         else:
-            await query.message.reply_text(
-                f"💌 Любимая пишет...\n\n"
-                f"{item.get('text', '')}"
-            )
-
-        await query.message.reply_text(
-            "Хочешь отреагировать сердечком?)",
-            reply_markup=heart_keyboard
-        )
-        return
-
-    if data.startswith("send_heart:"):
-        archive_index = int(data.split(":")[1])
-        archive_items = state.get("archive", [])
-
-        if archive_index >= len(archive_items):
-            await query.message.reply_text("Ой, весточка потерялась 🫣")
-            return
-
-        item = archive_items[archive_index]
-        author_chat_id = item.get("from_chat_id")
-
-        if not author_chat_id:
-            await query.message.reply_text("Не получилось найти, кому отправить сердечко 🫣")
-            return
-
-        await context.bot.send_message(
-            chat_id=author_chat_id,
-            text="Твою весточку получили, увидели, оооочень улыбнулись! И отправили сердечко в ответ) ❤️"
-        )
-
-        await query.message.reply_text("Клааасс, спасибо за реакцию! Цем тебя!) ")
-        return
-
-    if data == "later_archive":
-        await query.message.reply_text(
-            'Хорошо, оно будет ждать своего часа '
-            '<tg-emoji emoji-id="5443132326189996902">🧑‍💻</tg-emoji>',
-            parse_mode="HTML"
-        )
-        return
-
-    if data in training_videos:
-        video = training_videos.get(data)
-        video_date = date.fromisoformat(data)
-        today = datetime.now(TIMEZONE).date()
-
-        if today < video_date:
-            await query.answer(
-                "Какая нетерпеливая!) Не тыкай! Еще рано! 😏",
-                show_alert=True
-            )
-            return
-
-        await query.edit_message_text(
-            f"{video['title']} 💪\n\n"
-            "Скоро здесь появится тренировка"
-        )
-        return
+            await query.message.reply_text(f"💌 Любимая пишет...\n\n{item.get('text', '')}")
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton('❤️', callback_data=f'send_heart:{index}')]])
+        await query.message.reply_text('Хочешь отреагировать сердечком?)', reply_markup=keyboard)
 
 
-async def test(update, context: ContextTypes.DEFAULT_TYPE):
-    today = datetime.now(TIMEZONE).date()
-    days_left = (TARGET_DATE - today).days
-
-    wish = daily_wishes.get(today.isoformat(), "").strip()
-
-    if days_left > 0:
-        text = (
-            '🔬 ТЕСТ\n\n'
-            'Доброе утроооо ☀️'
-            '<tg-emoji emoji-id="5256215937878609569">🐤</tg-emoji>\n\n'
-            'До Испании вместе осталось...\n'
-            f'⏳ <b>{days_left} {days_word(days_left)}</b> ⏳'
-            + (f'\n\n{wish}' if wish else '')
-        )
-    elif days_left == 0:
-        text = (
-            '🔬 ТЕСТ\n\n'
-            '<b>Сегодня тот самый день!</b> 🇪🇸\n\n'
-            'Ураааа, любимаяяя! Мы летим вместе отдыхааать!! ✈️💗'
-        )
-    else:
-        text = "Отсчёт уже завершён 🇪🇸"
-
-    test_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "Хочу написать что-то в ответ!",
-                callback_data="test_morning_reply"
-            )
-        ]
+async def setup_commands(app: Application):
+    await app.bot.set_my_commands([
+        BotCommand('write', '💌 Просто написать!'),
+        BotCommand('archive_add', '📦 Мысль в архив'),
+        BotCommand('cem', '😽 Отправить цем!'),
+        BotCommand('archive', '💗 Посмотреть архив'),
     ])
 
-    await update.message.reply_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=test_keyboard
-    )
-
-
-async def get_video_id(update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.video:
-        await update.message.reply_text(update.message.video.file_id)
-    elif update.message.document:
-        await update.message.reply_text(update.message.document.file_id)
-
-async def send_video_now(update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Пробую отправить сегодняшнюю тренировку 🎥")
-    await send_training_video(context)
 
 def main():
-    app = Application.builder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("test", test))
-    app.add_handler(CommandHandler("test_morning", test_morning))
-    app.add_handler(CommandHandler("videos", videos))
-    app.add_handler(CommandHandler("archive_add", archive_add))
-    app.add_handler(CommandHandler("archive", archive))
-    app.add_handler(CommandHandler("cem", cem))
-
-    app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, get_video_id))
+    if not TOKEN:
+        raise RuntimeError('Укажите BOT_TOKEN в переменных окружения.')
+    app = Application.builder().token(TOKEN).post_init(setup_commands).build()
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('write', write))
+    app.add_handler(CommandHandler('archive_add', archive_add))
+    app.add_handler(CommandHandler('cem', cem))
+    app.add_handler(CommandHandler('archive', archive))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(CommandHandler("send_video_now", send_video_now))
-    
-    app.job_queue.run_daily(
-        morning,
-        time=time(hour=7, minute=7, tzinfo=TIMEZONE)
-    )
-
-    app.job_queue.run_daily(
-        send_training_video,
-        time=time(hour=8, minute=31, tzinfo=TIMEZONE)
-    )
-
+    app.add_handler(MessageHandler(~filters.COMMAND & ~filters.StatusUpdate.ALL, handle_message))
     app.run_polling(drop_pending_updates=True)
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
