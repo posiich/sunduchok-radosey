@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import random
+import uuid
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -56,9 +57,10 @@ BUTTON_WRITE = '💌 Просто написать!'
 BUTTON_ADD = '📦 Пополнить архив милостей'
 BUTTON_CEM = '😽 Отправить цем!'
 BUTTON_ARCHIVE = '💗 Посмотреть архив'
+BUTTON_PROPOSAL = '💡 Сделать предложение!'
 BUTTON_VIEW_MESSAGES = '💌 Смотреть сообщения'
 BUTTON_VIEW_CEMS = '😽 Смотреть цемы'
-KEYBOARD = ReplyKeyboardMarkup([[BUTTON_WRITE, BUTTON_ADD], [BUTTON_CEM, BUTTON_ARCHIVE]], resize_keyboard=True, is_persistent=True)
+KEYBOARD = ReplyKeyboardMarkup([[BUTTON_WRITE, BUTTON_ADD], [BUTTON_CEM, BUTTON_ARCHIVE], [BUTTON_PROPOSAL]], resize_keyboard=True, is_persistent=True)
 
 PROMPTS = [
     'Пиши сообщение, а я отнесу любимой 💌',
@@ -84,6 +86,8 @@ def load_state():
     state.setdefault('archive', [])
     state.setdefault('waiting', {})
     state.setdefault('prompt_bags', {})
+    state.setdefault('proposals', {})
+    state.setdefault('proposal_drafts', {})
     return state
 
 
@@ -213,6 +217,160 @@ async def notify_archive(context, state, sender, index):
             log.warning('Не удалось уведомить %s: %s', recipient, exc)
 
 
+PROPOSAL_REPLIES = [
+    'Твой ответ уже доставлен! 💌',
+    'Уии, обратная связь улетела адресату 🕊️',
+    'Передала твой выбор! 💗',
+    'Готово, твой ответ уже ждут! ✨',
+    'Письмо с ответом отправлено 😽',
+    'Доставлено бережно и с любовью 🌷',
+    'Твой голос учтён, адресат уведомлён 💞',
+    'Ответ отправлен, всё по плану! 🐾',
+    'Есть контакт! Твой выбор доставлен 💌',
+    'Ура, ответ уже у автора предложения! 🥹',
+]
+
+
+def proposal_draft_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('✅ Отправить предложение', callback_data='proposal_publish')],
+        [InlineKeyboardButton('❌ Отменить', callback_data='proposal_cancel')],
+    ])
+
+
+async def begin_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    state = load_state()
+    register(state, chat_id)
+    state['waiting'].pop(str(chat_id), None)
+    state['proposal_drafts'][str(chat_id)] = {'stage': 'text', 'text': '', 'options': []}
+    save_state(state)
+    await update.effective_message.reply_text(
+        '💡 Твоё предложение впиши сюда!\n\nНапример: «На 12.03 запланирован милый созвон».'
+    )
+
+
+async def proposal_input(update: Update, context: ContextTypes.DEFAULT_TYPE, state):
+    msg = update.effective_message
+    chat_id = str(update.effective_chat.id)
+    draft = state['proposal_drafts'][chat_id]
+    if not msg.text or not msg.text.strip():
+        await msg.reply_text('Напиши текстом, пожалуйста 💌')
+        return
+    value = msg.text.strip()
+    if draft['stage'] == 'text':
+        if len(value) > 1000:
+            await msg.reply_text('Сократи предложение до 1000 символов 💗')
+            return
+        draft['text'] = value
+        draft['stage'] = 'options'
+        save_state(state)
+        await msg.reply_text(
+            'Теперь придумай первый вариант ответа для кнопки.\n'
+            'Например: «Я согласен» или «Предложить другую дату».\n\n'
+            'Можно создать от 1 до 4 кнопок.'
+        )
+        return
+    if len(value) > 64:
+        await msg.reply_text('Название кнопки должно быть не длиннее 64 символов 😽')
+        return
+    if value in draft['options']:
+        await msg.reply_text('Такая кнопка уже есть. Придумай другую 💌')
+        return
+    if len(draft['options']) >= 4:
+        await msg.reply_text('Максимум четыре кнопки. Нажми «Отправить предложение».', reply_markup=proposal_draft_keyboard())
+        return
+    draft['options'].append(value)
+    save_state(state)
+    count = len(draft['options'])
+    summary = '\n'.join(f'{i}. {option}' for i, option in enumerate(draft['options'], 1))
+    await msg.reply_text(
+        f'Готовые варианты ({count}/4):\n{summary}\n\n'
+        + ('Все четыре готовы! Отправляем?' if count == 4 else 'Напиши ещё один вариант или нажми «Отправить предложение». '),
+        reply_markup=proposal_draft_keyboard(),
+    )
+
+
+async def proposal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data or ''
+    user_id = query.from_user.id
+    chat_id = query.message.chat_id
+    state = load_state()
+    if data in ('proposal_cancel', 'proposal_publish'):
+        draft = state['proposal_drafts'].get(str(chat_id))
+        if not draft:
+            await query.answer('Черновик уже закрыт', show_alert=True)
+            return
+        if data == 'proposal_cancel':
+            state['proposal_drafts'].pop(str(chat_id), None)
+            save_state(state)
+            await query.answer()
+            await query.edit_message_text('Предложение отменено 💗')
+            return
+        if not draft['text'] or not draft['options']:
+            await query.answer('Сначала напиши предложение и хотя бы один вариант ответа', show_alert=True)
+            return
+        proposal_id = uuid.uuid4().hex[:12]
+        proposal = {
+            'author': chat_id,
+            'text': draft['text'],
+            'options': draft['options'][:4],
+            'responses': {},
+        }
+        state['proposals'][proposal_id] = proposal
+        state['proposal_drafts'].pop(str(chat_id), None)
+        save_state(state)
+        await query.answer()
+        await query.edit_message_text('Предложение создано! 💌')
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(label, callback_data=f'proposal_vote:{proposal_id}:{i}')]
+            for i, label in enumerate(proposal['options'])
+        ])
+        delivered = 0
+        for recipient in set(state['users']) | set(state['chat_ids']):
+            if str(recipient) == str(chat_id):
+                continue
+            try:
+                await context.bot.send_message(recipient, proposal['text'], reply_markup=keyboard)
+                delivered += 1
+            except TelegramError:
+                log.exception('Не удалось доставить предложение участнику')
+        await context.bot.send_message(chat_id, f'💌 Предложение отправлено {delivered} участникам!')
+        return
+    if data.startswith('proposal_vote:'):
+        try:
+            _, proposal_id, option_index_text = data.split(':')
+            option_index = int(option_index_text)
+        except (ValueError, TypeError):
+            await query.answer('Некорректная кнопка', show_alert=True)
+            return
+        proposal = state['proposals'].get(proposal_id)
+        if not proposal or not 0 <= option_index < len(proposal['options']):
+            await query.answer('Это предложение уже недоступно', show_alert=True)
+            return
+        if str(proposal['author']) == str(chat_id):
+            await query.answer('Это твоё предложение 💗', show_alert=True)
+            return
+        if str(user_id) in proposal['responses']:
+            await query.answer('Ты уже ответила на это предложение 💗', show_alert=True)
+            return
+        option = proposal['options'][option_index]
+        proposal['responses'][str(user_id)] = option
+        save_state(state)
+        await query.answer()
+        await context.bot.send_message(chat_id, random.choice(PROPOSAL_REPLIES))
+        try:
+            await context.bot.send_message(
+                proposal['author'],
+                f'💌 На твоё предложение:\n«{proposal["text"]}»\n\n'
+                f'Ответили: «{option}» 💗',
+            )
+        except TelegramError:
+            log.exception('Не удалось доставить ответ автору предложения')
+        return
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
@@ -220,6 +378,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     state = load_state()
     # Кнопки панели обрабатываются до режима ожидания сообщения.
+    if msg.text == BUTTON_PROPOSAL:
+        await begin_proposal(update, context)
+        return
+    if str(chat_id) in state['proposal_drafts']:
+        await proposal_input(update, context, state)
+        return
     # Old reply-keyboard buttons remain usable in existing Telegram chats.
     if msg.text == BUTTON_VIEW_MESSAGES:
         await show_archive_category(update, context, 'text')
@@ -307,6 +471,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info('Archive button pressed: %s', query.data)
     await query.answer()
     data = query.data or ''
+    if data.startswith('proposal_'):
+        await proposal_callback(update, context)
+        return
 
     if data in ('archive_messages', 'archive_cems'):
         kind = 'text' if data == 'archive_messages' else 'cem_photo'
