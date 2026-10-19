@@ -246,7 +246,7 @@ async def begin_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state['proposal_drafts'][str(chat_id)] = {'stage': 'text', 'text': '', 'options': []}
     save_state(state)
     await update.effective_message.reply_text(
-        '💡 Твоё предложение впиши сюда!\n\nНапример: «На 12.03 запланирован милый созвон».'
+        'Следующим сообщением напиши текст для своего предложения'
     )
 
 
