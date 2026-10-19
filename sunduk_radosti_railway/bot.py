@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from telegram import BotCommand, Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.error import TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -20,13 +20,19 @@ TIMEZONE = ZoneInfo('Europe/Sofia')
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
+BUTTON_WRITE = '💌 Написать!'
+BUTTON_ADD = '📦 Добавить в архив'
+BUTTON_CEM = '😽 Отправить цем!'
+BUTTON_ARCHIVE = '💗 Посмотреть архив'
+KEYBOARD = ReplyKeyboardMarkup([[BUTTON_WRITE, BUTTON_ADD], [BUTTON_CEM, BUTTON_ARCHIVE]], resize_keyboard=True, is_persistent=True)
+
 PROMPTS = [
     'Пиши сообщение, а я отнесу любимой 💌',
     'Ну рассказывай! Я уже приготовил крылышки для доставки 🕊️',
-    'Что передать твоему любимому человеку?))',
+    'Что передать твоему любимому человеку? 💗',
     'Пиши скорее, тут кое-кто очень ждёт весточку 🥹',
     'Давай свои самые тёплые слова, доставлю бережно ✨',
-    'Опааа, давай пиши! Любимая уже ждет!',
+    'Шепни мне, что передать. Обещаю ничего не добавлять 🤫',
     'Есть что сказать любимой? Я весь внимание 😽',
     'Твоё сообщение уже почти летит. Осталось его написать 💌',
     'Пиши! У меня сегодня экспресс-доставка нежностей 🐾',
@@ -80,7 +86,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
     register(state, update.effective_chat.id)
     save_state(state)
-    await update.message.reply_text('Привет, любимая! 💗\n\nЗдесь можно писать друг другу, сохранять весточки и собирать цемы. Выбирай команду в меню бота 😽')
+    await update.message.reply_text('Привет, любимая! 💗\n\nЗдесь можно писать друг другу, сохранять весточки и собирать цемы. Выбирай кнопку на панельке 😽', reply_markup=KEYBOARD)
 
 
 async def write(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,6 +144,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat_id = update.effective_chat.id
     state = load_state()
+    # Кнопки панели обрабатываются до режима ожидания сообщения.
+    if msg.text == BUTTON_WRITE:
+        await write(update, context)
+        return
+    if msg.text == BUTTON_ADD:
+        await archive_add(update, context)
+        return
+    if msg.text == BUTTON_CEM:
+        await cem(update, context)
+        return
+    if msg.text == BUTTON_ARCHIVE:
+        await archive(update, context)
+        return
     mode = state['waiting'].get(str(chat_id))
     if not mode:
         return
@@ -246,12 +265,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def setup_commands(app: Application):
-    await app.bot.set_my_commands([
-        BotCommand('write', '💌 Просто написать!'),
-        BotCommand('archive_add', '📦 Мысль в архив'),
-        BotCommand('cem', '😽 Отправить цем!'),
-        BotCommand('archive', '💗 Посмотреть архив'),
-    ])
+    # Убираем старые команды из синего меню Telegram.
+    await app.bot.delete_my_commands()
 
 
 def main():
