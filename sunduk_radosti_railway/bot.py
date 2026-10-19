@@ -20,8 +20,8 @@ TIMEZONE = ZoneInfo('Europe/Sofia')
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-BUTTON_WRITE = '💌 Написать!'
-BUTTON_ADD = '📦 Добавить в архив'
+BUTTON_WRITE = '💌 Просто написать!'
+BUTTON_ADD = '📦 Пополнить архив милостей'
 BUTTON_CEM = '😽 Отправить цем!'
 BUTTON_ARCHIVE = '💗 Посмотреть архив'
 KEYBOARD = ReplyKeyboardMarkup([[BUTTON_WRITE, BUTTON_ADD], [BUTTON_CEM, BUTTON_ARCHIVE]], resize_keyboard=True, is_persistent=True)
@@ -32,7 +32,7 @@ PROMPTS = [
     'Что передать твоему любимому человеку? 💗',
     'Пиши скорее, тут кое-кто очень ждёт весточку 🥹',
     'Давай свои самые тёплые слова, доставлю бережно ✨',
-    'Шепни мне, что передать. Обещаю ничего не добавлять 🤫',
+    'Тааак! Давай-давай, любимая уже ждет!',
     'Есть что сказать любимой? Я весь внимание 😽',
     'Твоё сообщение уже почти летит. Осталось его написать 💌',
     'Пиши! У меня сегодня экспресс-доставка нежностей 🐾',
