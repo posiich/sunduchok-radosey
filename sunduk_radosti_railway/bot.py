@@ -179,7 +179,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if success:
             state['waiting'].pop(str(chat_id), None)
             save_state(state)
-            # Никаких дополнительных сообщений получателям и отправителю.
+            # Подтверждение только отправителю после успешной доставки.
+            await msg.reply_text('💌')
         else:
             await msg.reply_text('Не получилось доставить сообщение. Попробуй ещё раз.')
         return
